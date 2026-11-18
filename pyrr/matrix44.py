@@ -503,9 +503,93 @@ def inverse(m):
     return np.linalg.inv(m)
 
 
+def _decompose_orthogonality_tolerance(dtype):
+    """Tolerance used to decide whether the rows of a rotation candidate are
+    orthonormal, scaled to the floating point precision of the input.
+    """
+    dtype = np.dtype(dtype)
+    if dtype.kind != 'f':
+        dtype = np.dtype(np.float64)
+    return 100.0 * np.finfo(dtype).eps
+
+
+def _nearest_orthogonal_matrix(m):
+    """Returns the nearest orthogonal matrix (in the Frobenius sense) to the
+    given 3x3 matrix via its polar decomposition.
+
+    This is the optimal rotation for a sheared matrix and is deterministic.
+    The result always has determinant +1 (it is a pure rotation, never a
+    reflection).
+    """
+    u, _, vt = np.linalg.svd(np.asarray(m, dtype=np.float64))
+    rotation = np.dot(u, vt)
+    if np.linalg.det(rotation) < 0:
+        # degenerate / reflected input, force a proper rotation
+        u = u.copy()
+        u[:, -1] *= -1
+        rotation = np.dot(u, vt)
+    return rotation
+
+
+def _rotation_from_zero_scale(m, scale, nonzero):
+    """Builds a rotation matrix when one or more scale axes are zero.
+
+    The rows of ``m`` belonging to non-zero scale axes are orthonormalised
+    (Gram-Schmidt, in axis order); rows belonging to collapsed axes cannot be
+    recovered from the matrix and are reconstructed deterministically from
+    the remaining rows via cross products, keeping the determinant at +1.
+    """
+    rows = {}
+    for i in range(3):
+        if not nonzero[i]:
+            continue
+        r = np.asarray(m[i], dtype=np.float64) / scale[i]
+        # orthogonalise against the rows already accepted
+        for j in sorted(rows):
+            r = r - np.dot(r, rows[j]) * rows[j]
+        n = np.linalg.norm(r)
+        if n > 1e-8:
+            rows[i] = r / n
+        # else: row is parallel to a previous one, treat it as unrecoverable
+
+    missing = [i for i in range(3) if i not in rows]
+
+    if len(missing) == 3:
+        return np.eye(3)
+
+    if len(missing) == 2:
+        # a single recoverable row, pick the deterministic completion:
+        # use the standard basis axis (!= the row's axis) least aligned with
+        # the known row to seed a second orthonormal row
+        i = 3 - missing[0] - missing[1]  # the known row index
+        u = rows[i]
+        candidates = [j for j in range(3) if j != i]
+        j = min(candidates, key=lambda j: abs(u[j]))
+        e = np.zeros(3)
+        e[j] = 1.0
+        v = e - np.dot(e, u) * u
+        v /= np.linalg.norm(v)
+        rows[min(missing)] = v
+        missing.remove(min(missing))
+
+    # exactly one row missing, recover it via the cyclic cross product so
+    # that det(rotation) == +1
+    k = missing[0]
+    rows[k] = np.cross(rows[(k + 1) % 3], rows[(k + 2) % 3])
+
+    return np.array([rows[0], rows[1], rows[2]])
+
+
 def decompose(m):
     """Decomposes an affine transformation matrix into its scale, rotation and
     translation components.
+
+    Matrices with a negative determinant (an odd number of negative scales)
+    cannot be represented exactly; the reflection is folded into the scale
+    of the x-axis by deterministic convention. Sheared matrices are
+    approximated by the nearest rotation (polar decomposition). Collapsed
+    (zero scale) axes yield a scale of 0 and their rotation rows are
+    reconstructed deterministically from the remaining axes.
 
     :param numpy.array m: A matrix.
     :return: tuple (scale, rotation, translation)
@@ -519,10 +603,22 @@ def decompose(m):
 
     det = np.linalg.det(m)
     if det < 0:
+        # deterministic sign convention: the reflection is always placed on
+        # the x-axis scale
         scale[0] *= -1
 
     position = m[3, :3]
 
-    rotation = m[:3, :3] * (1 / scale)[:, None]
+    nonzero = scale != 0.0
+    if np.all(nonzero):
+        rotation = m[:3, :3] * (1 / scale)[:, None]
+        # a genuine rotation has orthonormal rows; if not, the matrix
+        # contains shear and we take the nearest rotation instead
+        gram = np.dot(rotation, rotation.T)
+        if np.abs(gram - np.eye(3)).max() > _decompose_orthogonality_tolerance(rotation.dtype):
+            rotation = _nearest_orthogonal_matrix(rotation).astype(rotation.dtype)
+    else:
+        rotation = _rotation_from_zero_scale(m[:3, :3], scale, nonzero)
+        rotation = np.asarray(rotation, dtype=np.result_type(m.dtype, scale.dtype))
 
     return scale, quaternion.create_from_matrix(rotation), position

@@ -485,6 +485,105 @@ class test_matrix44(unittest.TestCase):
         np.testing.assert_almost_equal(translation, expected_translation)
         self.assertTrue(translation.dtype == expected_translation.dtype)
 
+    @staticmethod
+    def _compose_trs(scale, rotation, translation, dtype='f8'):
+        s = matrix44.create_from_scale(scale, dtype=dtype)
+        r = matrix44.create_from_quaternion(rotation, dtype=dtype)
+        t = matrix44.create_from_translation(translation, dtype=dtype)
+        return s.dot(r).dot(t)
+
+    def test_decompose_negative_determinant(self):
+        # an odd number of negative scales cannot be represented exactly;
+        # the reflection is placed on the x-axis scale by convention and the
+        # recomposition must still be exact
+        rotation = quaternion.create_from_y_rotation(0.7)
+        translation = [1., 2., 3.]
+        for authored_scale in ([1., 1., -1.], [1., -2., 1.], [-3., 1., 1.]):
+            model = self._compose_trs(authored_scale, rotation, translation)
+
+            scale, rot, trans = matrix44.decompose(model)
+
+            # deterministic sign convention: reflection always on x
+            self.assertTrue(scale[0] < 0)
+            self.assertTrue(scale[1] > 0)
+            self.assertTrue(scale[2] > 0)
+
+            # recomposition is exact
+            result = self._compose_trs(scale, rot, trans)
+            np.testing.assert_allclose(result, model, atol=1e-12)
+
+            # decomposition is a fixed point (no drift on repeated round trips)
+            scale2, rot2, trans2 = matrix44.decompose(result)
+            np.testing.assert_allclose(scale2, scale, atol=1e-12)
+            np.testing.assert_allclose(np.abs(rot2), np.abs(rot), atol=1e-12)
+            np.testing.assert_allclose(trans2, trans, atol=1e-12)
+
+    def test_decompose_zero_scale(self):
+        # collapsed axes must not produce NaN/inf and must recompose exactly
+        rotation = quaternion.create_from_y_rotation(0.7)
+        translation = [1., 2., 3.]
+        for authored_scale in ([1., 2., 0.], [0., 2., 3.], [3., 0., 0.], [0., 0., 0.]):
+            model = self._compose_trs(authored_scale, rotation, translation)
+
+            scale, rot, trans = matrix44.decompose(model)
+
+            self.assertTrue(np.all(np.isfinite(scale)))
+            self.assertTrue(np.all(np.isfinite(rot)))
+            self.assertTrue(np.all(np.isfinite(trans)))
+            # zero scales are recovered as zero
+            np.testing.assert_allclose(np.abs(scale), np.abs(authored_scale), atol=1e-12)
+            # rotation is a valid unit quaternion
+            np.testing.assert_allclose(np.linalg.norm(rot), 1.0, atol=1e-12)
+
+            # recomposition is exact
+            result = self._compose_trs(scale, rot, trans)
+            np.testing.assert_allclose(result, model, atol=1e-12)
+
+    def test_decompose_shear(self):
+        # shear is not representable as TRS; the decomposition must be
+        # deterministic, finite, orthogonal and a fixed point
+        model = np.array([
+            [1.0, 0.5, 0.0, 0.0],
+            [0.0, 1.0, 0.3, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 2.0, 3.0, 1.0],
+        ])
+
+        scale, rot, trans = matrix44.decompose(model)
+
+        self.assertTrue(np.all(np.isfinite(scale)))
+        self.assertTrue(np.all(np.isfinite(rot)))
+        # rotation is a valid unit quaternion
+        np.testing.assert_allclose(np.linalg.norm(rot), 1.0, atol=1e-12)
+        # translation is exact
+        np.testing.assert_allclose(trans, [1., 2., 3.], atol=1e-12)
+
+        # determinism
+        scale2, rot2, trans2 = matrix44.decompose(model)
+        np.testing.assert_array_equal(scale2, scale)
+        np.testing.assert_array_equal(rot2, rot)
+        np.testing.assert_array_equal(trans2, trans)
+
+        # fixed point: recomposing and decomposing again does not drift
+        recomposed = self._compose_trs(scale, rot, trans)
+        scale3, rot3, trans3 = matrix44.decompose(recomposed)
+        np.testing.assert_allclose(scale3, scale, atol=1e-12)
+        np.testing.assert_allclose(np.abs(rot3), np.abs(rot), atol=1e-12)
+        np.testing.assert_allclose(trans3, trans, atol=1e-12)
+
+    def test_decompose_normal_unchanged(self):
+        # well-formed TRS matrices decompose exactly as before the fix
+        rotation = quaternion.create_from_z_rotation(0.3)
+        model = self._compose_trs([1., 2., 3.], rotation, [10., 0., -5.], dtype='f4')
+
+        scale, rot, trans = matrix44.decompose(model)
+
+        np.testing.assert_almost_equal(scale, [1., 2., 3.])
+        np.testing.assert_almost_equal(rot, quaternion.create_from_z_rotation(0.3, dtype='f4'))
+        np.testing.assert_almost_equal(trans, [10., 0., -5.])
+        self.assertTrue(scale.dtype == np.dtype('f4'))
+        self.assertTrue(rot.dtype == np.dtype('f4'))
+
 
 if __name__ == '__main__':
     unittest.main()
