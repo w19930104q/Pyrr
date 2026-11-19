@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [Unreleased]
+
+- Add optional `depth_range` parameter to the perspective and orthogonal
+  projection matrix functions. `(-1.0, 1.0)` / `'opengl'` selects the
+  historical OpenGL NDC depth convention (default, unchanged behaviour),
+  while `(0.0, 1.0)` / `'directx'` produces matrices matching the
+  Direct3D, Metal and Vulkan convention.
+
 ## [0.10.3] - 2019-04-19
 
 - Fix some of the plane.create_(xz,xy,yz) not inverting correctly.

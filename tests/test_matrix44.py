@@ -486,5 +486,217 @@ class test_matrix44(unittest.TestCase):
         self.assertTrue(translation.dtype == expected_translation.dtype)
 
 
+class test_matrix44_depth_range(unittest.TestCase):
+    """Depth range / clipping convention (-1..1 OpenGL vs 0..1 Direct3D)."""
+
+    # common frustum: left=-1, right=1, bottom=-1, top=1, near=1, far=10
+    bounds = (-1., 1., -1., 1., 1., 10.)
+    # eye-space points on, inside and outside the near / far planes
+    boundary_points = (
+        # (x, y, z_eye, expected inside?)
+        (0., 0., -1., True),    # on the near plane
+        (0., 0., -10., True),   # on the far plane
+        (0., 0., -5., True),    # between the planes
+        (0., 0., -0.5, False),  # in front of the near plane
+        (0., 0., -11., False),  # beyond the far plane
+    )
+
+    def _assert_ndc_z_bounds(self, mat, convention):
+        lo, hi = convention
+        for x, y, z, inside in self.boundary_points:
+            clip = matrix44.apply_to_vector(mat, np.array((x, y, z, 1.)))
+            ndc = clip[:3] / clip[3]
+            if z == -1.:
+                # near plane maps to the low end of the NDC depth range
+                np.testing.assert_almost_equal(ndc[2], lo, decimal=10)
+            elif z == -10.:
+                # far plane maps to the high end of the NDC depth range
+                np.testing.assert_almost_equal(ndc[2], hi, decimal=10)
+            if inside:
+                self.assertTrue(lo <= ndc[2] <= hi, (convention, z, ndc[2]))
+            else:
+                self.assertFalse(lo <= ndc[2] <= hi, (convention, z, ndc[2]))
+
+    def test_perspective_default_is_opengl_convention(self):
+        # default behaviour must be unchanged: identical to the explicit
+        # OpenGL (-1..1) convention
+        default = matrix44.create_perspective_projection_from_bounds(*self.bounds)
+        explicit = matrix44.create_perspective_projection_from_bounds(
+            *self.bounds, depth_range=matrix44.DEPTH_RANGE_OPENGL)
+        np.testing.assert_array_equal(default, explicit)
+
+    def test_orthogonal_default_is_opengl_convention(self):
+        default = matrix44.create_orthogonal_projection(*self.bounds)
+        explicit = matrix44.create_orthogonal_projection(
+            *self.bounds, depth_range=matrix44.DEPTH_RANGE_OPENGL)
+        np.testing.assert_array_equal(default, explicit)
+
+    def test_perspective_reference_matrices(self):
+        # Reference values derived from the standard OpenGL / Direct3D
+        # off-centre perspective projection (right handed, row vectors).
+        gl = matrix44.create_perspective_projection_from_bounds(
+            *self.bounds, depth_range=(-1., 1.))
+        expected_gl = np.array((
+            (1., 0., 0., 0.),
+            (0., 1., 0., 0.),
+            (0., 0., -11. / 9., -1.),
+            (0., 0., -20. / 9., 0.),
+        ))
+        np.testing.assert_allclose(gl, expected_gl, rtol=1e-12)
+
+        dx = matrix44.create_perspective_projection_from_bounds(
+            *self.bounds, depth_range=(0., 1.))
+        expected_dx = np.array((
+            (1., 0., 0., 0.),
+            (0., 1., 0., 0.),
+            (0., 0., -10. / 9., -1.),
+            (0., 0., -10. / 9., 0.),
+        ))
+        np.testing.assert_allclose(dx, expected_dx, rtol=1e-12)
+
+    def test_orthogonal_reference_matrices(self):
+        # Reference values derived from the standard OpenGL / Direct3D
+        # off-centre orthogonal projection (right handed, row vectors).
+        gl = matrix44.create_orthogonal_projection(
+            *self.bounds, depth_range=(-1., 1.))
+        expected_gl = np.array((
+            (1., 0., 0., 0.),
+            (0., 1., 0., 0.),
+            (0., 0., -2. / 9., 0.),
+            (0., 0., -11. / 9., 1.),
+        ))
+        np.testing.assert_allclose(gl, expected_gl, rtol=1e-12)
+
+        dx = matrix44.create_orthogonal_projection(
+            *self.bounds, depth_range=(0., 1.))
+        expected_dx = np.array((
+            (1., 0., 0., 0.),
+            (0., 1., 0., 0.),
+            (0., 0., -1. / 9., 0.),
+            (0., 0., -1. / 9., 1.),
+        ))
+        np.testing.assert_allclose(dx, expected_dx, rtol=1e-12)
+
+    def test_perspective_near_far_boundaries_both_conventions(self):
+        for convention in (matrix44.DEPTH_RANGE_OPENGL,
+                           matrix44.DEPTH_RANGE_DIRECTX):
+            mat = matrix44.create_perspective_projection_from_bounds(
+                *self.bounds, depth_range=convention)
+            self._assert_ndc_z_bounds(mat, convention)
+
+    def test_orthogonal_near_far_boundaries_both_conventions(self):
+        for convention in (matrix44.DEPTH_RANGE_OPENGL,
+                           matrix44.DEPTH_RANGE_DIRECTX):
+            mat = matrix44.create_orthogonal_projection(
+                *self.bounds, depth_range=convention)
+            self._assert_ndc_z_bounds(mat, convention)
+
+    def test_perspective_w_clipping(self):
+        # Perspective: clip_w must equal -z_eye under both conventions,
+        # so the w <= 0 guard rejects points at or behind the camera.
+        for convention in (matrix44.DEPTH_RANGE_OPENGL,
+                           matrix44.DEPTH_RANGE_DIRECTX):
+            mat = matrix44.create_perspective_projection_from_bounds(
+                *self.bounds, depth_range=convention)
+            for z in (-1., -5., -10.):
+                clip = matrix44.apply_to_vector(
+                    mat, np.array((0., 0., z, 1.)))
+                np.testing.assert_almost_equal(clip[3], -z, decimal=10)
+                self.assertGreater(clip[3], 0.)
+            # camera origin and points behind it produce non-positive w
+            for z in (0., 1.):
+                clip = matrix44.apply_to_vector(
+                    mat, np.array((0., 0., z, 1.)))
+                self.assertLessEqual(clip[3], 0.)
+
+    def test_orthogonal_w_clipping(self):
+        # Orthogonal: w is always 1 under both conventions, so depth
+        # clipping is performed against clip_z directly.
+        for convention in (matrix44.DEPTH_RANGE_OPENGL,
+                           matrix44.DEPTH_RANGE_DIRECTX):
+            mat = matrix44.create_orthogonal_projection(
+                *self.bounds, depth_range=convention)
+            for x, y, z, inside in self.boundary_points:
+                clip = matrix44.apply_to_vector(
+                    mat, np.array((x, y, z, 1.)))
+                np.testing.assert_almost_equal(clip[3], 1., decimal=10)
+
+    def test_fovy_wrapper_matches_bounds_wrapper_both_conventions(self):
+        fovy, aspect, near, far = 90., 1024. / 768., 1., 10.
+        ymax = near * np.tan(fovy * np.pi / 360.)
+        xmax = ymax * aspect
+        for convention in (None, matrix44.DEPTH_RANGE_OPENGL,
+                           matrix44.DEPTH_RANGE_DIRECTX):
+            kwargs = {} if convention is None else {'depth_range': convention}
+            actual = matrix44.create_perspective_projection(
+                fovy, aspect, near, far, **kwargs)
+            expected = matrix44.create_perspective_projection_from_bounds(
+                -xmax, xmax, -ymax, ymax, near, far, **kwargs)
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_deprecated_wrappers_forward_depth_range(self):
+        kwargs = dict(depth_range=matrix44.DEPTH_RANGE_DIRECTX)
+        np.testing.assert_array_equal(
+            matrix44.create_perspective_projection_matrix(
+                90., 1., 1., 10., **kwargs),
+            matrix44.create_perspective_projection(90., 1., 1., 10., **kwargs))
+        np.testing.assert_array_equal(
+            matrix44.create_perspective_projection_matrix_from_bounds(
+                *self.bounds, **kwargs),
+            matrix44.create_perspective_projection_from_bounds(
+                *self.bounds, **kwargs))
+        np.testing.assert_array_equal(
+            matrix44.create_orthogonal_projection_matrix(
+                *self.bounds, **kwargs),
+            matrix44.create_orthogonal_projection(*self.bounds, **kwargs))
+
+    def test_string_aliases(self):
+        for name in ('opengl', 'gl', '-1..1', 'OpenGL'):
+            np.testing.assert_array_equal(
+                matrix44.create_perspective_projection_from_bounds(
+                    *self.bounds, depth_range=name),
+                matrix44.create_perspective_projection_from_bounds(
+                    *self.bounds, depth_range=matrix44.DEPTH_RANGE_OPENGL))
+        for name in ('directx', 'd3d', 'metal', 'vulkan', '0..1'):
+            np.testing.assert_array_equal(
+                matrix44.create_perspective_projection_from_bounds(
+                    *self.bounds, depth_range=name),
+                matrix44.create_perspective_projection_from_bounds(
+                    *self.bounds, depth_range=matrix44.DEPTH_RANGE_DIRECTX))
+
+    def test_invalid_depth_range_raises(self):
+        for bad in ('voodoo', (0., 5.), (1., 0.)):
+            with self.assertRaises(ValueError):
+                matrix44.create_perspective_projection_from_bounds(
+                    *self.bounds, depth_range=bad)
+            with self.assertRaises(ValueError):
+                matrix44.create_orthogonal_projection(
+                    *self.bounds, depth_range=bad)
+
+    def test_dtype_preserved_with_depth_range(self):
+        mat = matrix44.create_perspective_projection_from_bounds(
+            *self.bounds, dtype='float32',
+            depth_range=matrix44.DEPTH_RANGE_DIRECTX)
+        self.assertEqual(mat.dtype, np.float32)
+        mat = matrix44.create_orthogonal_projection(
+            *self.bounds, dtype='float64',
+            depth_range=matrix44.DEPTH_RANGE_DIRECTX)
+        self.assertEqual(mat.dtype, np.float64)
+
+    def test_off_centre_bounds_convention_independent_terms(self):
+        # A, B, E, F do not depend on the depth range convention
+        gl = matrix44.create_perspective_projection_from_bounds(
+            -2., 3., -4., 5., 1., 10.,
+            depth_range=matrix44.DEPTH_RANGE_OPENGL)
+        dx = matrix44.create_perspective_projection_from_bounds(
+            -2., 3., -4., 5., 1., 10.,
+            depth_range=matrix44.DEPTH_RANGE_DIRECTX)
+        np.testing.assert_allclose(gl[0:2, 0:2], dx[0:2, 0:2])
+        np.testing.assert_allclose(gl[2, 0:2], dx[2, 0:2])
+        # only the depth row differs
+        self.assertFalse(np.allclose(gl[2, 2], dx[2, 2]))
+        self.assertFalse(np.allclose(gl[3, 2], dx[3, 2]))
+
+
 if __name__ == '__main__':
     unittest.main()

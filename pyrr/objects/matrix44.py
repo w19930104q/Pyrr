@@ -140,22 +140,24 @@ class Matrix44(BaseMatrix44):
         return cls(matrix44.create_from_matrix33(matrix, dtype))
 
     @classmethod
-    def perspective_projection(cls, fovy, aspect, near, far, dtype=None):
+    def perspective_projection(cls, fovy, aspect, near, far, dtype=None, depth_range=None):
         """Creates a Matrix44 for use as a perspective projection matrix.
         """
-        return cls(matrix44.create_perspective_projection(fovy, aspect, near, far, dtype))
+        return cls(matrix44.create_perspective_projection(fovy, aspect, near, far, dtype, depth_range))
 
     @classmethod
-    def perspective_projection_bounds(cls, left, right, top, bottom, near, far, dtype=None):
+    def perspective_projection_bounds(cls, left, right, top, bottom, near, far,
+                                      dtype=None, depth_range=None):
         """Creates a Matrix44 for use as a perspective projection matrix.
         """
-        return cls(matrix44.create_perspective_projection_from_bounds(left, right, top, bottom, near, far, dtype))
+        return cls(matrix44.create_perspective_projection_from_bounds(
+            left, right, top, bottom, near, far, dtype, depth_range))
 
     @classmethod
-    def orthogonal_projection(cls, left, right, top, bottom, near, far, dtype=None):
+    def orthogonal_projection(cls, left, right, top, bottom, near, far, dtype=None, depth_range=None):
         """Creates a Matrix44 for use as an orthogonal projection matrix.
         """
-        return cls(matrix44.create_orthogonal_projection(left, right, top, bottom, near, far, dtype))
+        return cls(matrix44.create_orthogonal_projection(left, right, top, bottom, near, far, dtype, depth_range))
 
     @classmethod
     def look_at(cls, eye, target, up, dtype=None):
