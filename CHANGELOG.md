@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [Unreleased]
+
+- Add pyrr.frustum: create view frustums from view-projection matrices and test points, spheres and AABBs against them.
+- Add pyrr.bvh: a bounding volume hierarchy over AABBs accelerating frustum culling and AABB / ray queries. Query results are identical to per-object tests.
+- Add geometric_tests.aabb_intersect_aabb.
+
 ## [0.10.3] - 2019-04-19
 
 - Fix some of the plane.create_(xz,xy,yz) not inverting correctly.

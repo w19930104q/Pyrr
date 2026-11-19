@@ -8,7 +8,9 @@ from .version import __version__
 __all__ = [
     'aabb',
     'aambb',
+    'bvh',
     'euler',
+    'frustum',
     'geometric_tests',
     'geometry',
     'integer',
@@ -35,7 +37,9 @@ __all__ = [
 from . import (
     aabb,
     aambb,
+    bvh,
     euler,
+    frustum,
     geometric_tests,
     geometry,
     integer,

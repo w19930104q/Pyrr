@@ -438,3 +438,20 @@ def ray_intersect_sphere(ray, sphere):
         if t >= 0:
             ret.append(ray_origin + ray_direction * t)
     return ret
+
+@all_parameters_as_numpy_arrays
+def aabb_intersect_aabb(aabb1, aabb2):
+    """Checks if two AABBs overlap.
+
+    :param numpy.array aabb1: The first AABB.
+    :param numpy.array aabb2: The second AABB.
+    :rtype: boolean
+    :return: Returns True if the two AABBs touch or overlap.
+        Otherwise, returns False.
+    """
+    # the AABBs overlap if they overlap on all 3 axes
+    if np.any(aabb1[0] > aabb2[1]):
+        return False
+    if np.any(aabb1[1] < aabb2[0]):
+        return False
+    return True

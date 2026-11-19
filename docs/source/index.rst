@@ -31,7 +31,9 @@ Procedural API
     :maxdepth: 2
 
     api_aabb
+    api_bvh
     api_euler
+    api_frustum
     api_geometric_tests
     api_geometry
     api_integer
