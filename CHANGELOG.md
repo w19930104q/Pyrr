@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [0.10.1] - Unreleased
 
+- Add `pyrr.camera` module composing the camera pipeline (look at, perspective projection and viewport transform) into single entry points, with validation of degenerate inputs.
+
 ## [0.10.0] - 2018-12-23
 
 - Fix unit tests failing due to changes in numpy.testing (#77)

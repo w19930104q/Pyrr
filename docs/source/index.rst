@@ -31,6 +31,7 @@ Procedural API
     :maxdepth: 2
 
     api_aabb
+    api_camera
     api_euler
     api_geometric_tests
     api_geometry
