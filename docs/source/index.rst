@@ -41,6 +41,7 @@ Procedural API
     api_quaternion
     api_ray
     api_rectangle
+    api_skin
     api_sphere
     api_trig
     api_utils
