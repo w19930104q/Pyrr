@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [Unreleased]
+
+- Add `euler.create_from_quaternion`, the inverse of `quaternion.create_from_eulers`, with deterministic gimbal-lock handling: the arcsine argument is clamped, `q` and `-q` yield identical eulers, and at pitch = +/- pi/2 the yaw is set to 0 with the combined rotation folded into roll. Quaternion -> euler -> quaternion round trips are now stable at and around gimbal lock.
+
 ## [0.10.3] - 2019-04-19
 
 - Fix some of the plane.create_(xz,xy,yz) not inverting correctly.
