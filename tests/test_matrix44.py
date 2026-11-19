@@ -455,7 +455,108 @@ class test_matrix44(unittest.TestCase):
         m = matrix44.create_from_y_rotation(np.pi)
         result = matrix44.inverse(m)
         self.assertTrue(np.allclose(result, matrix44.create_from_y_rotation(-np.pi)))
-    
+
+    def _trs_matrices(self):
+        t = matrix44.create_from_translation([5., -3., 2.])
+        r = matrix44.create_from_quaternion(
+            quaternion.normalize([1., 2., 3., 4.])
+        )
+        s = matrix44.create_from_scale([2., 3., 4.])
+        return {'T': t, 'R': r, 'S': s}
+
+    def test_inverse_trs_round_trip_any_order(self):
+        # compose -> inverse -> apply must round-trip within tolerance
+        # for any order of translation, rotation and scale.
+        import itertools
+        mats = self._trs_matrices()
+        vec = np.array([1., -2., 3.])
+        for order in itertools.permutations('TRS'):
+            m = matrix44.create_identity()
+            for key in order:
+                m = matrix44.multiply(m, mats[key])
+            result = matrix44.apply_to_vector(
+                matrix44.inverse(m),
+                matrix44.apply_to_vector(m, vec)
+            )
+            self.assertFalse(np.isnan(result).any())
+            np.testing.assert_almost_equal(result, vec, decimal=5)
+
+    def test_inverse_trs_repeated_round_trip_no_drift(self):
+        # repeated compose -> inverse -> apply round-trips must not
+        # accumulate error.
+        import itertools
+        mats = self._trs_matrices()
+        vec = np.array([1., -2., 3.])
+        for order in itertools.permutations('TRS'):
+            m = matrix44.create_identity()
+            for key in order:
+                m = matrix44.multiply(m, mats[key])
+            for _ in range(50):
+                mi = matrix44.inverse(m)
+                self.assertFalse(np.isnan(mi).any())
+                result = matrix44.apply_to_vector(
+                    mi, matrix44.apply_to_vector(m, vec)
+                )
+                np.testing.assert_almost_equal(result, vec, decimal=5)
+                # invert the inverse; the matrix itself must not drift
+                m = matrix44.inverse(mi)
+
+    def test_inverse_trs_degenerate_scale_no_nan(self):
+        # a zero scale component makes the transform singular.
+        # the inverse must not raise and must not produce NaNs.
+        import itertools
+        mats = self._trs_matrices()
+        mats['S'] = matrix44.create_from_scale([0., 1., 1.])
+        vec = np.array([1., -2., 3.])
+        for order in itertools.permutations('TRS'):
+            m = matrix44.create_identity()
+            for key in order:
+                m = matrix44.multiply(m, mats[key])
+            mi = matrix44.inverse(m)
+            self.assertFalse(np.isnan(mi).any())
+            result = matrix44.apply_to_vector(
+                mi, matrix44.apply_to_vector(m, vec)
+            )
+            self.assertFalse(np.isnan(result).any())
+
+    def test_inverse_trs_degenerate_quaternion_no_nan(self):
+        # a zero-length quaternion is degenerate and must not
+        # produce NaNs when composed into a TRS transform.
+        import itertools
+        mats = self._trs_matrices()
+        mats['R'] = matrix44.create_from_quaternion([0., 0., 0., 0.])
+        self.assertFalse(np.isnan(mats['R']).any())
+        vec = np.array([1., -2., 3.])
+        for order in itertools.permutations('TRS'):
+            m = matrix44.create_identity()
+            for key in order:
+                m = matrix44.multiply(m, mats[key])
+            mi = matrix44.inverse(m)
+            self.assertFalse(np.isnan(mi).any())
+            result = matrix44.apply_to_vector(
+                mi, matrix44.apply_to_vector(m, vec)
+            )
+            self.assertFalse(np.isnan(result).any())
+            np.testing.assert_almost_equal(result, vec, decimal=5)
+
+    def test_inverse_preserves_dtype(self):
+        mats = self._trs_matrices()
+        m = matrix44.multiply(mats['T'], matrix44.multiply(mats['R'], mats['S']))
+        m = m.astype(np.float32)
+        self.assertEqual(matrix44.inverse(m).dtype, np.float32)
+
+    def test_decompose_degenerate_scale_no_nan(self):
+        # decomposing a matrix with a zero scale component must
+        # not produce NaNs.
+        s = matrix44.create_from_scale([0., 1., 1.])
+        r = matrix44.create_from_quaternion([0., 0., 0., 1.])
+        t = matrix44.create_from_translation([1., 2., 3.])
+        m = s.dot(r).dot(t)
+        scale, rotation, translation = matrix44.decompose(m)
+        self.assertFalse(np.isnan(scale).any())
+        self.assertFalse(np.isnan(rotation).any())
+        self.assertFalse(np.isnan(translation).any())
+
     def test_decompose(self):
         # define expectations
         expected_scale = vector3.create(*[1, 1, 2], dtype='f4')

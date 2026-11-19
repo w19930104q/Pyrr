@@ -255,6 +255,25 @@ class test_quaternion(unittest.TestCase):
         ]
         np.testing.assert_almost_equal(result, expected, decimal=5)
 
+    def test_normalize_zero_length(self):
+        # a zero-length quaternion is degenerate; normalizing it must
+        # return the identity quaternion instead of NaNs.
+        result = quaternion.normalize([0., 0., 0., 0.])
+        self.assertFalse(np.isnan(result).any())
+        np.testing.assert_almost_equal(result, [0., 0., 0., 1.], decimal=5)
+
+    def test_normalize_zero_length_batch(self):
+        result = quaternion.normalize([
+            [0., 0., 0., 0.],
+            [1., 2., 3., 4.],
+        ])
+        self.assertFalse(np.isnan(result).any())
+        expected = [
+            [0., 0., 0., 1.],
+            [1. / np.sqrt(30.), np.sqrt(2. / 15.), np.sqrt(3. / 10.), 2. * np.sqrt(2. / 15.)],
+        ]
+        np.testing.assert_almost_equal(result, expected, decimal=5)
+
     def test_rotation_angle(self):
         result = quaternion.rotation_angle([5.77350000e-01, 5.77350000e-01, 5.77350000e-01, 6.12323400e-17])
         np.testing.assert_almost_equal(result, np.pi, decimal=5)

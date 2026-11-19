@@ -104,19 +104,21 @@ def create_from_matrix(mat, dtype=None):
         qz = (mat[1][0] - mat[0][1]) * s
         qw = 0.25 / s
     elif mat[0][0] > mat[1][1] and mat[0][0] > mat[2][2]:
-        s = 2.0 * np.sqrt(1.0 + mat[0][0] - mat[1][1] - mat[2][2])
+        # clamp to 0.0 to avoid NaNs from degenerate matrices
+        # (eg. those produced by decomposing a zero-scale transform)
+        s = 2.0 * np.sqrt(np.maximum(0.0, 1.0 + mat[0][0] - mat[1][1] - mat[2][2]))
         qx = 0.25 * s
         qy = (mat[0][1] + mat[1][0]) / s
         qz = (mat[0][2] + mat[2][0]) / s
         qw = (mat[2][1] - mat[1][2]) / s
     elif mat[1][1] > mat[2][2]:
-        s = 2.0 * np.sqrt(1.0 + mat[1][1] - mat[0][0] - mat[2][2])
+        s = 2.0 * np.sqrt(np.maximum(0.0, 1.0 + mat[1][1] - mat[0][0] - mat[2][2]))
         qx = (mat[0][1] + mat[1][0]) / s
         qy = 0.25 * s
         qz = (mat[1][2] + mat[2][1]) / s
         qw = (mat[0][2] - mat[2][0]) / s
     else:
-        s = 2.0 * np.sqrt(1.0 + mat[2][2] - mat[0][0] - mat[1][1])
+        s = 2.0 * np.sqrt(np.maximum(0.0, 1.0 + mat[2][2] - mat[0][0] - mat[1][1]))
         qx = (mat[0][2] + mat[2][0]) / s
         qy = (mat[1][2] + mat[2][1]) / s
         qz = 0.25 * s
@@ -308,11 +310,26 @@ def normalize(quat):
 
     The quaternion is **not** changed in place.
 
+    A zero-length quaternion is degenerate and has no meaningful
+    rotation. Instead of returning NaNs, the identity quaternion
+    is returned for such input.
+
     :param numpy.array quat: The quaternion to normalize.
     :rtype: numpy.array
     :return: The normalized quaternion(s).
     """
-    return vector4.normalize(quat)
+    quat = np.asarray(quat)
+    lengths = vector4.length(quat)
+    # guard against degenerate (zero-length) quaternions which
+    # would otherwise produce NaNs through a division by zero.
+    zero = lengths == 0.0
+    safe_lengths = np.where(zero, 1.0, lengths)
+    result = quat / safe_lengths[..., np.newaxis]
+    # a zero-length quaternion represents no rotation,
+    # substitute the identity quaternion.
+    identity = np.zeros_like(result)
+    identity[..., index.w] = 1.0
+    return np.where(zero[..., np.newaxis], identity, result)
 
 def normalise(quat):    # TODO: mark as deprecated
     """Ensure a quaternion is unit length (length ~= 1.0).
@@ -323,7 +340,7 @@ def normalise(quat):    # TODO: mark as deprecated
     :rtype: numpy.array
     :return: The normalized quaternion(s).
     """
-    return vector4.normalize(quat)
+    return normalize(quat)
 
 def rotation_angle(quat):
     """Calculates the rotation around the quaternion's axis.

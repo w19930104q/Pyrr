@@ -492,7 +492,18 @@ def create_look_at(eye, target, up, dtype=None):
 def inverse(m):
     """Returns the inverse of the matrix.
 
-    This is essentially a wrapper around numpy.linalg.inv.
+    Affine matrices (any composition of translation, rotation and
+    scale, in any order) are inverted block-wise: the 3x3 linear
+    part and the translation are inverted separately. This is more
+    numerically stable than a general 4x4 inversion and preserves
+    the affine structure exactly, so repeated compose -> invert ->
+    apply round-trips do not accumulate error in the last row.
+
+    If the linear part is degenerate (singular, eg. a zero scale
+    component), the pseudo-inverse is used so that no NaNs or
+    exceptions are produced.
+
+    Anything else falls back to numpy.linalg.inv.
 
     :param numpy.array m: A matrix.
     :rtype: numpy.array
@@ -500,6 +511,32 @@ def inverse(m):
 
     .. seealso:: http://docs.scipy.org/doc/numpy/reference/generated/numpy.linalg.inv.html
     """
+    m = np.asarray(m)
+
+    # an affine matrix has a last column of [0, 0, 0, 1]
+    # (the translation is stored in the bottom row).
+    # any composition of translation / rotation / scale matrices
+    # keeps this form exactly, regardless of the order.
+    if m.shape == (4, 4) and np.array_equal(m[:, 3], [0., 0., 0., 1.]):
+        linear = m[:3, :3]
+        try:
+            inv_linear = np.linalg.inv(linear)
+        except np.linalg.LinAlgError:
+            # degenerate (singular) linear part, eg. a zero scale
+            # component. use the pseudo-inverse to avoid NaNs.
+            inv_linear = np.linalg.pinv(linear)
+
+        if np.issubdtype(m.dtype, np.floating):
+            dtype = m.dtype
+        else:
+            # match numpy.linalg.inv which always returns floats
+            dtype = np.float64
+
+        result = np.identity(4, dtype=dtype)
+        result[:3, :3] = inv_linear
+        result[3, :3] = -np.dot(m[3, :3], inv_linear)
+        return result
+
     return np.linalg.inv(m)
 
 
@@ -523,6 +560,12 @@ def decompose(m):
 
     position = m[3, :3]
 
-    rotation = m[:3, :3] * (1 / scale)[:, None]
+    # guard against degenerate (zero) scale components which would
+    # otherwise produce NaNs in the rotation matrix through a
+    # division by zero.
+    inv_scale = np.zeros_like(scale)
+    np.divide(1.0, scale, out=inv_scale, where=(scale != 0.0))
+
+    rotation = m[:3, :3] * inv_scale[:, None]
 
     return scale, quaternion.create_from_matrix(rotation), position

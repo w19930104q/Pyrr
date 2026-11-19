@@ -327,13 +327,22 @@ def inverse(mat):
 
     This is essentially a wrapper around numpy.linalg.inv.
 
+    If the matrix is degenerate (singular, eg. a zero scale
+    component), the pseudo-inverse is returned instead of raising,
+    so that no NaNs or exceptions are produced.
+
     :param numpy.array m: A matrix.
     :rtype: numpy.array
     :return: The inverse of the specified matrix.
 
     .. seealso:: http://docs.scipy.org/doc/numpy/reference/generated/numpy.linalg.inv.html
     """
-    return np.linalg.inv(mat)
+    try:
+        return np.linalg.inv(mat)
+    except np.linalg.LinAlgError:
+        # degenerate (singular) matrix, use the pseudo-inverse
+        # to avoid NaNs / exceptions.
+        return np.linalg.pinv(mat)
 
 def create_direction_scale(direction, scale):
     """Creates a matrix which can apply a directional scaling to a set of vectors.
